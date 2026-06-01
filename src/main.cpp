@@ -5,6 +5,7 @@
 #include "Audio.h"
 #include "SD.h"
 #include "FS.h"
+#include "Keypad.h"
 
 // microSD Card Reader connections
 #define SD_CS 5
@@ -18,23 +19,31 @@
 #define I2S_BCLK 26
 #define I2S_LRC 25
 
-#define SWITCH_PIN 27
 #define AUDIO_FILE "/Lorin_Urbantat.wav"
-#define SWITCH_DEBOUNCE_MS 50
+
+const byte ROWS = 4;
+const byte COLS = 3;
+
+char keys[ROWS][COLS] = {
+    {'1', '2', '3'},
+    {'4', '5', '6'},
+    {'7', '8', '9'},
+    {'*', '0', '#'}};
+
+byte rowPins[ROWS] = {32, 33, 13, 14};
+byte colPins[COLS] = {27, 16, 17};
 
 // Create Audio object
 Audio audio;
-bool lastRawSwitchClosed = false;
-bool lastSwitchClosed = false;
-unsigned long lastSwitchChangeMs = 0;
+Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
+
+byte activeKeys = 0;
 
 void setup()
 {
   // Start Serial Port
   Serial.begin(115200);
   delay(1000);
-
-  pinMode(SWITCH_PIN, INPUT_PULLDOWN);
 
   // Set microSD Card CS as OUTPUT and set HIGH
   pinMode(SD_CS, OUTPUT);
@@ -61,37 +70,53 @@ void setup()
 
   // Set Volume
   audio.setVolume(6);
+
+  keypad.setDebounceTime(50);
+  keypad.setHoldTime(500);
 }
 
 void loop()
 {
-  bool rawSwitchClosed = digitalRead(SWITCH_PIN) == HIGH;
-
-  if (rawSwitchClosed != lastRawSwitchClosed)
+  if (keypad.getKeys())
   {
-    lastRawSwitchClosed = rawSwitchClosed;
-    lastSwitchChangeMs = millis();
+    for (byte i = 0; i < LIST_MAX; i++)
+    {
+      if (!keypad.key[i].kchar)
+      {
+        continue;
+      }
+
+      switch (keypad.key[i].kstate)
+      {
+      case PRESSED:
+        activeKeys++;
+        Serial.printf("Key %c closed: starting audio\n", keypad.key[i].kchar);
+        audio.stopSong();
+        audio.connecttoFS(SD, AUDIO_FILE);
+        break;
+
+      case RELEASED:
+        if (activeKeys > 0)
+        {
+          activeKeys--;
+        }
+
+        Serial.printf("Key %c open\n", keypad.key[i].kchar);
+
+        if (activeKeys == 0)
+        {
+          Serial.println("All keys open: stopping audio");
+          audio.stopSong();
+        }
+        break;
+
+      default:
+        break;
+      }
+    }
   }
 
-  if ((millis() - lastSwitchChangeMs) >= SWITCH_DEBOUNCE_MS &&
-      rawSwitchClosed != lastSwitchClosed)
-  {
-    lastSwitchClosed = rawSwitchClosed;
-
-    if (lastSwitchClosed)
-    {
-      Serial.println("Switch closed: starting audio");
-      audio.stopSong();
-      audio.connecttoFS(SD, AUDIO_FILE);
-    }
-    else
-    {
-      Serial.println("Switch open: stopping audio");
-      audio.stopSong();
-    }
-  }
-
-  if (lastSwitchClosed)
+  if (activeKeys > 0)
   {
     audio.loop();
   }

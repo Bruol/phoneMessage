@@ -10,6 +10,7 @@
             "includePath": [
                 "/Users/bruol/code/phoneMessage/include",
                 "/Users/bruol/code/phoneMessage/src",
+                "/Users/bruol/code/phoneMessage/.pio/libdeps/esp32dev/Keypad/src",
                 "/Users/bruol/code/phoneMessage/.pio/libdeps/esp32dev/ESP32-audioI2S/src",
                 "/Users/bruol/.platformio/packages/framework-arduinoespressif32/libraries/WiFiClientSecure/src",
                 "/Users/bruol/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
@@ -247,6 +248,7 @@
                 "path": [
                     "/Users/bruol/code/phoneMessage/include",
                     "/Users/bruol/code/phoneMessage/src",
+                    "/Users/bruol/code/phoneMessage/.pio/libdeps/esp32dev/Keypad/src",
                     "/Users/bruol/code/phoneMessage/.pio/libdeps/esp32dev/ESP32-audioI2S/src",
                     "/Users/bruol/.platformio/packages/framework-arduinoespressif32/libraries/WiFiClientSecure/src",
                     "/Users/bruol/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src",
