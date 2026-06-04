@@ -99,6 +99,44 @@ pio device monitor
 
 When a keypad key is pressed, the ESP32 starts the configured audio file. Playback continues while at least one key is held. When all keys are released, playback stops.
 
+## Volume Control
+
+Double press the reset input on GPIO 21, then press a keypad number to set the volume. Key `0` sets volume level 1, key `1` sets volume level 2, and so on up to key `9`, which sets volume level 10.
+
+## SD Card Upload Mode
+
+On startup the ESP32 leaves Wi-Fi in station mode and runs the normal phone-message player. To edit the SD card over Wi-Fi, press and hold the reset input on GPIO 21 for 5 seconds.
+
+The firmware stops playback and starts an open access point:
+
+```text
+PhoneMessage Upload
+```
+
+Connect to that network from a phone or computer. The captive portal should open automatically; if it does not, browse to:
+
+```text
+http://192.168.4.1/
+```
+
+The portal lists the SD card contents, lets you download or delete existing files, and uploads new files to the SD card root.
+
+## OTA Firmware Updates
+
+The upload-mode access point also runs ArduinoOTA, so PlatformIO can upload firmware directly over Wi-Fi.
+
+1. Hold the reset input on GPIO 21 for 5 seconds.
+2. Connect your computer to the `PhoneMessage Upload` Wi-Fi network.
+3. In PlatformIO, select the `esp32dev_ota` environment and run Upload.
+
+From the terminal:
+
+```sh
+pio run -e esp32dev_ota --target upload
+```
+
+The USB upload environment remains `esp32dev`.
+
 ## Project Layout
 
 ```text
