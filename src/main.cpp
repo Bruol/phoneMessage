@@ -34,7 +34,11 @@ const char *OTA_HOSTNAME = "phone-message";
 const byte DNS_PORT = 53;
 const byte DEFAULT_VOLUME_LEVEL = 5;
 
-#define AUDIO_FILE "/Lorin_Urbantat.wav"
+#define MAX_VOICE_NODES 64
+#define MAX_AUDIO_PATH_LENGTH 96
+#define MAX_METADATA_BYTES 512
+#define MAX_SCAN_DEPTH 4
+#define KEYPAD_CONFIRM_TIMEOUT_MS 1200
 
 const byte ROWS = 4;
 const byte COLS = 3;
@@ -69,6 +73,9 @@ bool resetHoldHandled = false;
 bool uploadMode = false;
 bool waitingForVolumeKey = false;
 byte volumeLevel = DEFAULT_VOLUME_LEVEL;
+
+void clearKeypadBuffer();
+void stopPlayback();
 
 String htmlEscape(const String &value)
 {
@@ -223,7 +230,8 @@ void startUploadMode()
 
   uploadMode = true;
   activeInputs = 0;
-  audio.stopSong();
+  clearKeypadBuffer();
+  stopPlayback();
 
   WiFi.disconnect(true);
   WiFi.mode(WIFI_AP);
@@ -303,27 +311,241 @@ void setVolumeLevel(byte level)
   Serial.printf("Volume set to %u\n", volumeLevel);
 }
 
-void inputClosed(const char *inputName)
+struct VoiceNode
 {
-  activeInputs++;
-  Serial.printf("%s closed: starting audio\n", inputName);
-  audio.stopSong();
-  audio.connecttoFS(SD, AUDIO_FILE);
-}
+  char number[4];
+  char audioPath[MAX_AUDIO_PATH_LENGTH];
+};
 
-void inputOpened(const char *inputName)
+VoiceNode voiceNodes[MAX_VOICE_NODES];
+byte voiceNodeCount = 0;
+char keypadBuffer[4] = "";
+byte keypadBufferLength = 0;
+unsigned long lastKeypadDigitMs = 0;
+bool audioActive = false;
+
+bool endsWithIgnoreCase(const char *text, const char *suffix)
 {
-  if (activeInputs > 0)
+  size_t textLength = strlen(text);
+  size_t suffixLength = strlen(suffix);
+
+  if (suffixLength > textLength)
   {
-    activeInputs--;
+    return false;
   }
 
-  Serial.printf("%s open\n", inputName);
+  return strcasecmp(text + textLength - suffixLength, suffix) == 0;
+}
 
-  if (activeInputs == 0)
+void stopPlayback()
+{
+  if (!audioActive)
   {
-    Serial.println("All inputs open: stopping audio");
-    audio.stopSong();
+    return;
+  }
+
+  Serial.println("Stopping audio");
+  audio.stopSong();
+  audioActive = false;
+}
+
+void startPlayback(const char *audioPath)
+{
+  Serial.printf("Starting audio: %s\n", audioPath);
+  audio.stopSong();
+  audio.connecttoFS(SD, audioPath);
+  audioActive = true;
+}
+
+void clearKeypadBuffer()
+{
+  keypadBuffer[0] = '\0';
+  keypadBufferLength = 0;
+  lastKeypadDigitMs = 0;
+}
+
+bool parseNumberMetadata(const char *metadataPath, char *number, size_t numberSize)
+{
+  File metadata = SD.open(metadataPath, FILE_READ);
+  if (!metadata)
+  {
+    Serial.printf("Metadata not found: %s\n", metadataPath);
+    return false;
+  }
+
+  char buffer[MAX_METADATA_BYTES + 1];
+  size_t bytesRead = metadata.readBytes(buffer, MAX_METADATA_BYTES);
+  metadata.close();
+  buffer[bytesRead] = '\0';
+
+  char *key = strstr(buffer, "\"number\"");
+  if (!key)
+  {
+    key = strstr(buffer, "number");
+  }
+
+  if (!key)
+  {
+    Serial.printf("Metadata missing number: %s\n", metadataPath);
+    return false;
+  }
+
+  char *value = strchr(key, ':');
+  if (!value)
+  {
+    Serial.printf("Metadata has invalid number field: %s\n", metadataPath);
+    return false;
+  }
+
+  value++;
+  while (*value == ' ' || *value == '\t' || *value == '\r' || *value == '\n' || *value == '"')
+  {
+    value++;
+  }
+
+  byte digitCount = 0;
+  while (isdigit(*value) && digitCount < numberSize - 1)
+  {
+    number[digitCount++] = *value++;
+  }
+  number[digitCount] = '\0';
+
+  if (digitCount < 2 || digitCount > 3)
+  {
+    Serial.printf("Metadata number must be 2 or 3 digits: %s\n", metadataPath);
+    return false;
+  }
+
+  return true;
+}
+
+void addVoiceNode(const char *audioPath)
+{
+  if (voiceNodeCount >= MAX_VOICE_NODES)
+  {
+    Serial.printf("Voice node limit reached; skipping %s\n", audioPath);
+    return;
+  }
+
+  char metadataPath[MAX_AUDIO_PATH_LENGTH];
+  strlcpy(metadataPath, audioPath, sizeof(metadataPath));
+
+  char *extension = strrchr(metadataPath, '.');
+  if (!extension)
+  {
+    return;
+  }
+  strlcpy(extension, ".json", sizeof(metadataPath) - (extension - metadataPath));
+
+  char number[4];
+  if (!parseNumberMetadata(metadataPath, number, sizeof(number)))
+  {
+    return;
+  }
+
+  strlcpy(voiceNodes[voiceNodeCount].number, number, sizeof(voiceNodes[voiceNodeCount].number));
+  strlcpy(voiceNodes[voiceNodeCount].audioPath, audioPath, sizeof(voiceNodes[voiceNodeCount].audioPath));
+
+  Serial.printf("Mapped keypad number %s to %s\n", voiceNodes[voiceNodeCount].number, voiceNodes[voiceNodeCount].audioPath);
+  voiceNodeCount++;
+}
+
+void scanVoiceNodes(const char *directoryPath, byte depth)
+{
+  if (depth > MAX_SCAN_DEPTH)
+  {
+    return;
+  }
+
+  File directory = SD.open(directoryPath);
+  if (!directory || !directory.isDirectory())
+  {
+    Serial.printf("Could not open directory: %s\n", directoryPath);
+    return;
+  }
+
+  while (true)
+  {
+    File entry = directory.openNextFile();
+    if (!entry)
+    {
+      break;
+    }
+
+    const char *entryPath = entry.path();
+    if (entry.isDirectory())
+    {
+      scanVoiceNodes(entryPath, depth + 1);
+    }
+    else if (endsWithIgnoreCase(entryPath, ".wav"))
+    {
+      addVoiceNode(entryPath);
+    }
+
+    entry.close();
+  }
+
+  directory.close();
+}
+
+const VoiceNode *findVoiceNode(const char *number)
+{
+  for (byte i = 0; i < voiceNodeCount; i++)
+  {
+    if (strcmp(voiceNodes[i].number, number) == 0)
+    {
+      return &voiceNodes[i];
+    }
+  }
+
+  return nullptr;
+}
+
+bool playBufferedNumber()
+{
+  const VoiceNode *voiceNode = findVoiceNode(keypadBuffer);
+  if (!voiceNode)
+  {
+    return false;
+  }
+
+  startPlayback(voiceNode->audioPath);
+  clearKeypadBuffer();
+  return true;
+}
+
+void handleKeypadDigit(char digit)
+{
+  if (keypadBufferLength >= sizeof(keypadBuffer) - 1)
+  {
+    clearKeypadBuffer();
+  }
+
+  keypadBuffer[keypadBufferLength++] = digit;
+  keypadBuffer[keypadBufferLength] = '\0';
+  lastKeypadDigitMs = millis();
+  Serial.printf("Entered keypad number: %s\n", keypadBuffer);
+}
+
+void confirmKeypadBufferAfterTimeout()
+{
+  if (keypadBufferLength == 0 ||
+      millis() - lastKeypadDigitMs < KEYPAD_CONFIRM_TIMEOUT_MS)
+  {
+    return;
+  }
+
+  if (keypadBufferLength < 2)
+  {
+    Serial.printf("Ignoring incomplete keypad number: %s\n", keypadBuffer);
+    clearKeypadBuffer();
+    return;
+  }
+
+  if (!playBufferedNumber())
+  {
+    Serial.printf("No voice node mapped to keypad number: %s\n", keypadBuffer);
+    clearKeypadBuffer();
   }
 }
 
@@ -362,11 +584,22 @@ void readSwitches()
 
     if (closed)
     {
-      inputClosed(switchName);
+      activeInputs++;
+      Serial.printf("%s closed\n", switchName);
+
+      if (switchPins[i] == RESET)
+      {
+        clearKeypadBuffer();
+        stopPlayback();
+      }
     }
     else
     {
-      inputOpened(switchName);
+      if (activeInputs > 0)
+      {
+        activeInputs--;
+      }
+      Serial.printf("%s open\n", switchName);
     }
   }
 }
@@ -387,6 +620,8 @@ void checkUploadModeRequest()
       resetPressed = true;
       resetHoldHandled = false;
       resetHoldStart = millis();
+      clearKeypadBuffer();
+      stopPlayback();
     }
     else if (!resetHoldHandled && millis() - resetHoldStart >= UPLOAD_MODE_HOLD_MS)
     {
@@ -446,6 +681,9 @@ void setup()
                 SD.cardType(),
                 SD.cardSize() / (1024ULL * 1024ULL));
 
+  scanVoiceNodes("/", 0);
+  Serial.printf("Loaded %u voice node metadata entries\n", voiceNodeCount);
+
   // Setup I2S
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
 
@@ -484,30 +722,29 @@ void loop()
       {
       case PRESSED:
       {
+        char key = keypad.key[i].kchar;
+
         if (waitingForVolumeKey)
         {
-          char key = keypad.key[i].kchar;
           if (key >= '0' && key <= '9')
           {
             setVolumeLevel((key - '0') + 1);
+            clearKeypadBuffer();
             waitingForVolumeKey = false;
           }
           break;
         }
 
-        char keyName[7];
-        snprintf(keyName, sizeof(keyName), "Key %c", keypad.key[i].kchar);
-        inputClosed(keyName);
+        if (isdigit(key))
+        {
+          handleKeypadDigit(key);
+        }
+
         break;
       }
 
       case RELEASED:
-      {
-        char keyName[7];
-        snprintf(keyName, sizeof(keyName), "Key %c", keypad.key[i].kchar);
-        inputOpened(keyName);
         break;
-      }
 
       default:
         break;
@@ -516,8 +753,9 @@ void loop()
   }
 
   readSwitches();
+  confirmKeypadBufferAfterTimeout();
 
-  if (activeInputs > 0)
+  if (audioActive)
   {
     audio.loop();
   }

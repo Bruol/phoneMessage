@@ -68,15 +68,32 @@ Libraries:
 | Column 2 | 16 |
 | Column 3 | 17 |
 
-## Audio File
+## Audio Files
 
-The firmware currently plays:
+Copy WAV files to the microSD card with a JSON metadata file next to each WAV file. The metadata file must use the same base name as the audio file:
 
-```cpp
-#define AUDIO_FILE "/Lorin_Urbantat.wav"
+```text
+/Lorin_Urbantat.wav
+/Lorin_Urbantat.json
 ```
 
-Copy `Lorin_Urbantat.wav` to the root of the microSD card, or update `AUDIO_FILE` in `src/main.cpp` to match the file you want to play.
+The JSON metadata must contain a `number` field with the 2- or 3-digit keypad number for that voice node:
+
+```json
+{
+  "number": "12"
+}
+```
+
+Numeric values also work:
+
+```json
+{
+  "number": 123
+}
+```
+
+At startup, the firmware scans the SD card for `.wav` files, looks for matching `.json` files, parses each `number`, and maps that keypad number to the WAV file. Enter the mapped 2- or 3-digit number on the keypad; after a short pause with no new digit pressed, the firmware confirms the entered number and starts the matching voice node. The reset switch clears the entered number and stops playback.
 
 The `Voice Notes/` folder contains source voice-note assets and converted WAV files that can be copied to the microSD card.
 
@@ -97,7 +114,7 @@ pio run --target upload
 pio device monitor
 ```
 
-When a keypad key is pressed, the ESP32 starts the configured audio file. Playback continues while at least one key is held. When all keys are released, playback stops.
+When a mapped keypad number is entered and the input timeout expires, the ESP32 starts the matching WAV file. Playback continues after the keys are released. Press the reset switch to clear input and stop playback.
 
 ## Volume Control
 
