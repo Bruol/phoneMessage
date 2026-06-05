@@ -10,8 +10,6 @@
 #include "ESPWebFileManager.h"
 #include "Keypad.h"
 
-
-
 // microSD Card Reader connections
 #define SD_CS 5
 #define SPI_MOSI 23
@@ -32,6 +30,7 @@
 #define WIFI_CONNECT_TIMEOUT_MS 15000
 
 const byte DEFAULT_VOLUME_LEVEL = 5;
+const char *DIAL_OUT_BEEP_PATH = "/dial_out_beep.mp3";
 
 #ifndef WIFI_SSID
 #define WIFI_SSID "co_werk_5"
@@ -83,6 +82,11 @@ bool waitingForVolumeKey = false;
 byte volumeLevel = DEFAULT_VOLUME_LEVEL;
 bool keyToneActive = false;
 
+bool isPhonePickedOpen()
+{
+  return digitalRead(PhonePicked) == HIGH;
+}
+
 void clearKeypadBuffer();
 void stopPlayback();
 void startUploadMode();
@@ -90,6 +94,7 @@ void stopUploadMode();
 void scanVoiceNodes(const char *directoryPath, byte depth);
 void scanVoiceNodeDirectories();
 void playKeyTone(char digit);
+void playDialOutBeep();
 
 bool connectConfiguredWifi()
 {
@@ -261,24 +266,23 @@ void startPlayback(const char *audioPath)
 
 void playKeyTone(char digit)
 {
-  if (audioActive)
-  {
-    return;
-  }
-
   byte toneNumber = (digit - '0') + 1;
   char tonePath[KEY_TONE_PATH_LENGTH];
   snprintf(tonePath, sizeof(tonePath), "/keys/%u.mp3", toneNumber);
 
-  if (!SD.exists(tonePath))
-  {
-    Serial.printf("Key tone not found: %s\n", tonePath);
-    return;
-  }
-
   audio.stopSong();
+  audioActive = false;
   keyToneActive = false;
   audio.connecttoFS(SD, tonePath);
+  keyToneActive = true;
+}
+
+void playDialOutBeep()
+{
+  audio.stopSong();
+  audioActive = false;
+  keyToneActive = false;
+  audio.connecttoFS(SD, DIAL_OUT_BEEP_PATH);
   keyToneActive = true;
 }
 
@@ -482,6 +486,7 @@ void confirmKeypadBufferAfterTimeout()
   if (!playBufferedNumber())
   {
     Serial.printf("No voice node mapped to keypad number: %s\n", keypadBuffer);
+    playDialOutBeep();
     clearKeypadBuffer();
   }
 }
@@ -537,6 +542,12 @@ void readSwitches()
         activeInputs--;
       }
       Serial.printf("%s open\n", switchName);
+
+      if (switchPins[i] == PhonePicked)
+      {
+        clearKeypadBuffer();
+        stopPlayback();
+      }
     }
   }
 }
@@ -683,6 +694,12 @@ void loop()
             clearKeypadBuffer();
             waitingForVolumeKey = false;
           }
+          break;
+        }
+
+        if (isPhonePickedOpen())
+        {
+          clearKeypadBuffer();
           break;
         }
 

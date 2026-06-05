@@ -99,6 +99,8 @@ The `voice_notes/` folder contains source voice-note assets and converted MP3 fi
 
 Keypad digit tones are loaded from `/keys/<digit>.mp3` on the microSD card, for example `/keys/1.mp3`. The tone starts on each digit press when no voice message is currently playing.
 
+If the entered keypad number is not assigned to a voice message, the firmware plays `/dial_out_beep.mp3`.
+
 ## Usage
 
 1. Wire the ESP32, keypad, microSD module, and I2S audio output using the pin tables above.
