@@ -9,7 +9,7 @@ if len(sys.argv) != 3:
 folder = Path(sys.argv[1])
 start_offset = int(sys.argv[2])
 
-wav_files = sorted(folder.glob("*.wav"))
+wav_files = sorted(folder.glob("*.mp3"))
 
 for index, wav_file in enumerate(wav_files, start=start_offset):
     json_file = wav_file.with_suffix(".json")
