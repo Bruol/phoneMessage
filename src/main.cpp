@@ -5,11 +5,12 @@
 #include "Audio.h"
 #include "SD.h"
 #include "FS.h"
-#include "Keypad.h"
 #include "WiFi.h"
-#include "WebServer.h"
-#include "DNSServer.h"
-#include "ArduinoOTA.h"
+#include "ESPAsyncWebServer.h"
+#include "ESPWebFileManager.h"
+#include "Keypad.h"
+
+
 
 // microSD Card Reader connections
 #define SD_CS 5
@@ -28,16 +29,24 @@
 #define SWITCH_DEBOUNCE_MS 50
 #define UPLOAD_MODE_HOLD_MS 5000
 #define RESET_DOUBLE_PRESS_MS 700
+#define WIFI_CONNECT_TIMEOUT_MS 15000
 
-const char *OTA_HOSTNAME = "phone-message";
-const byte DNS_PORT = 53;
 const byte DEFAULT_VOLUME_LEVEL = 5;
+
+#ifndef WIFI_SSID
+#define WIFI_SSID "co_werk_5"
+#endif
+
+#ifndef WIFI_PASSWORD
+#define WIFI_PASSWORD "TAMAM_1312"
+#endif
 
 #define MAX_VOICE_NODES 64
 #define MAX_AUDIO_PATH_LENGTH 96
 #define MAX_METADATA_BYTES 512
 #define MAX_SCAN_DEPTH 4
 #define KEYPAD_CONFIRM_TIMEOUT_MS 1200
+#define KEY_TONE_PATH_LENGTH 17
 
 const byte ROWS = 4;
 const byte COLS = 3;
@@ -54,8 +63,8 @@ byte colPins[COLS] = {27, 16, 17};
 // Create Audio object
 Audio audio;
 Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
-WebServer server(80);
-DNSServer dnsServer;
+AsyncWebServer server(80);
+ESPWebFileManager fileManager(FS_SD, false, true, SD_CS, SPI_MOSI, SPI_MISO, SPI_SCK);
 
 const byte switchPins[] = {RESET, PhonePicked};
 const byte switchCount = sizeof(switchPins) / sizeof(switchPins[0]);
@@ -69,154 +78,87 @@ unsigned long lastResetPressRelease = 0;
 bool resetPressed = false;
 bool resetHoldHandled = false;
 bool uploadMode = false;
+bool uploadServerConfigured = false;
 bool waitingForVolumeKey = false;
 byte volumeLevel = DEFAULT_VOLUME_LEVEL;
+bool keyToneActive = false;
 
 void clearKeypadBuffer();
 void stopPlayback();
+void startUploadMode();
+void stopUploadMode();
+void scanVoiceNodes(const char *directoryPath, byte depth);
+void scanVoiceNodeDirectories();
+void playKeyTone(char digit);
 
-String htmlEscape(const String &value)
+bool connectConfiguredWifi()
 {
-  String escaped = value;
-  escaped.replace("&", "&amp;");
-  escaped.replace("<", "&lt;");
-  escaped.replace(">", "&gt;");
-  escaped.replace("\"", "&quot;");
-  escaped.replace("'", "&#39;");
-  return escaped;
+  if (strlen(WIFI_SSID) == 0)
+  {
+    Serial.println("Wi-Fi credentials are not configured; upload mode requires an existing Wi-Fi network");
+    return false;
+  }
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.printf("Connecting to Wi-Fi network: %s\n", WIFI_SSID);
+
+  unsigned long startedAt = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startedAt < WIFI_CONNECT_TIMEOUT_MS)
+  {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println("Wi-Fi connection failed; upload mode was not started");
+    WiFi.disconnect(true);
+    return false;
+  }
+
+  Serial.printf("Wi-Fi connected: http://%s/\n", WiFi.localIP().toString().c_str());
+  return true;
 }
 
-String urlEncode(const String &value)
+void startUploadMode()
 {
-  String encoded;
-  const char *hex = "0123456789ABCDEF";
-
-  for (size_t i = 0; i < value.length(); i++)
+  if (uploadMode)
   {
-    char c = value[i];
-    if (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '/')
-    {
-      encoded += c;
-    }
-    else
-    {
-      encoded += '%';
-      encoded += hex[(c >> 4) & 0x0F];
-      encoded += hex[c & 0x0F];
-    }
+    return;
   }
 
-  return encoded;
-}
+  stopPlayback();
+  clearKeypadBuffer();
+  audio.stopSong();
 
-String normalizePath(String path)
-{
-  path.trim();
-  path.replace("\\", "/");
-
-  if (!path.startsWith("/"))
+  if (!connectConfiguredWifi())
   {
-    path = "/" + path;
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    return;
   }
 
-  while (path.indexOf("//") >= 0)
+  uploadMode = true;
+  if (!fileManager.begin())
   {
-    path.replace("//", "/");
+    Serial.println("ESPWebFileManager could not initialize the SD card");
+    uploadMode = false;
+    return;
   }
 
-  if (path.indexOf("..") >= 0)
+  if (!uploadServerConfigured)
   {
-    return "/";
+    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+              { request->redirect("/file"); });
+    fileManager.setServer(&server);
+    uploadServerConfigured = true;
   }
+  server.begin();
 
-  return path;
-}
-
-void appendFileRows(String &page, fs::File dir)
-{
-  File file = dir.openNextFile();
-  while (file)
-  {
-    String path = file.path();
-    bool directory = file.isDirectory();
-
-    page += "<tr><td>";
-    page += directory ? "dir" : "file";
-    page += "</td><td><a href=\"/file?path=";
-    page += urlEncode(path);
-    page += "\">";
-    page += htmlEscape(path);
-    page += "</a></td><td>";
-    page += directory ? "-" : String(file.size());
-    page += "</td><td>";
-
-    if (!directory)
-    {
-      page += "<form method=\"POST\" action=\"/delete\" onsubmit=\"return confirm('Delete ";
-      page += htmlEscape(path);
-      page += "?')\"><input type=\"hidden\" name=\"path\" value=\"";
-      page += htmlEscape(path);
-      page += "\"><button type=\"submit\">Delete</button></form>";
-    }
-
-    page += "</td></tr>";
-
-    if (directory)
-    {
-      appendFileRows(page, file);
-    }
-
-    file = dir.openNextFile();
-  }
-}
-
-void sendIndex()
-{
-  String page = F("<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-                  "<title>Phone Message Upload</title><style>"
-                  "body{font-family:system-ui,Arial,sans-serif;margin:24px;max-width:900px}"
-                  "table{width:100%;border-collapse:collapse;margin:20px 0}td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left}"
-                  "form{margin:0}button,input{font:inherit}button{padding:6px 10px}"
-                  ".upload{padding:16px;border:1px solid #ddd;border-radius:8px}"
-                  "</style></head><body><h1>Phone Message SD Card</h1>"
-                  "<div class=\"upload\"><form method=\"POST\" action=\"/upload\" enctype=\"multipart/form-data\">"
-                  "<p><input type=\"file\" name=\"file\" required> <button type=\"submit\">Upload</button></p>"
-                  "</form></div><table><thead><tr><th>Type</th><th>Path</th><th>Bytes</th><th></th></tr></thead><tbody>");
-
-  File root = SD.open("/");
-  appendFileRows(page, root);
-  page += F("</tbody></table></body></html>");
-  server.send(200, "text/html", page);
-}
-
-void handleUpload()
-{
-  static File uploadFile;
-  HTTPUpload &upload = server.upload();
-
-  if (upload.status == UPLOAD_FILE_START)
-  {
-    String filename = normalizePath(upload.filename);
-    if (SD.exists(filename))
-    {
-      SD.remove(filename);
-    }
-    uploadFile = SD.open(filename, FILE_WRITE);
-  }
-  else if (upload.status == UPLOAD_FILE_WRITE)
-  {
-    if (uploadFile)
-    {
-      uploadFile.write(upload.buf, upload.currentSize);
-    }
-  }
-  else if (upload.status == UPLOAD_FILE_END)
-  {
-    if (uploadFile)
-    {
-      uploadFile.close();
-    }
-  }
+  Serial.printf("SD-card Wi-Fi update mode is ready: http://%s/file\n",
+                WiFi.localIP().toString().c_str());
 }
 
 void setVolumeLevel(byte level)
@@ -244,6 +186,27 @@ byte keypadBufferLength = 0;
 unsigned long lastKeypadDigitMs = 0;
 bool audioActive = false;
 
+void stopUploadMode()
+{
+  if (!uploadMode)
+  {
+    return;
+  }
+
+  Serial.println("Stopping SD-card Wi-Fi update mode");
+  server.end();
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_STA);
+
+  uploadMode = false;
+  waitingForVolumeKey = false;
+  clearKeypadBuffer();
+
+  voiceNodeCount = 0;
+  scanVoiceNodeDirectories();
+  Serial.printf("Reloaded %u voice node metadata entries\n", voiceNodeCount);
+}
+
 bool endsWithIgnoreCase(const char *text, const char *suffix)
 {
   size_t textLength = strlen(text);
@@ -257,9 +220,16 @@ bool endsWithIgnoreCase(const char *text, const char *suffix)
   return strcasecmp(text + textLength - suffixLength, suffix) == 0;
 }
 
+bool isHiddenPath(const char *path)
+{
+  const char *name = strrchr(path, '/');
+  name = name ? name + 1 : path;
+  return name[0] == '.';
+}
+
 void stopPlayback()
 {
-  if (!audioActive)
+  if (!audioActive && !keyToneActive)
   {
     return;
   }
@@ -267,6 +237,18 @@ void stopPlayback()
   Serial.println("Stopping audio");
   audio.stopSong();
   audioActive = false;
+  keyToneActive = false;
+}
+
+void stopKeyTone()
+{
+  if (!keyToneActive)
+  {
+    return;
+  }
+
+  audio.stopSong();
+  keyToneActive = false;
 }
 
 void startPlayback(const char *audioPath)
@@ -275,6 +257,29 @@ void startPlayback(const char *audioPath)
   audio.stopSong();
   audio.connecttoFS(SD, audioPath);
   audioActive = true;
+}
+
+void playKeyTone(char digit)
+{
+  if (audioActive)
+  {
+    return;
+  }
+
+  byte toneNumber = (digit - '0') + 1;
+  char tonePath[KEY_TONE_PATH_LENGTH];
+  snprintf(tonePath, sizeof(tonePath), "/keys/%u.mp3", toneNumber);
+
+  if (!SD.exists(tonePath))
+  {
+    Serial.printf("Key tone not found: %s\n", tonePath);
+    return;
+  }
+
+  audio.stopSong();
+  keyToneActive = false;
+  audio.connecttoFS(SD, tonePath);
+  keyToneActive = true;
 }
 
 void clearKeypadBuffer()
@@ -393,6 +398,12 @@ void scanVoiceNodes(const char *directoryPath, byte depth)
     }
 
     const char *entryPath = entry.path();
+    if (isHiddenPath(entryPath))
+    {
+      entry.close();
+      continue;
+    }
+
     if (entry.isDirectory())
     {
       scanVoiceNodes(entryPath, depth + 1);
@@ -406,6 +417,11 @@ void scanVoiceNodes(const char *directoryPath, byte depth)
   }
 
   directory.close();
+}
+
+void scanVoiceNodeDirectories()
+{
+  scanVoiceNodes("/long", 0);
 }
 
 const VoiceNode *findVoiceNode(const char *number)
@@ -429,6 +445,7 @@ bool playBufferedNumber()
     return false;
   }
 
+  stopKeyTone();
   startPlayback(voiceNode->audioPath);
   clearKeypadBuffer();
   return true;
@@ -526,12 +543,27 @@ void readSwitches()
 
 void checkUploadModeRequest()
 {
+  bool pressed = digitalRead(RESET) == LOW;
+
   if (uploadMode)
   {
+    if (pressed)
+    {
+      if (!resetPressed)
+      {
+        resetPressed = true;
+        resetHoldHandled = true;
+        stopUploadMode();
+      }
+    }
+    else
+    {
+      resetPressed = false;
+      resetHoldHandled = false;
+      resetHoldStart = 0;
+    }
     return;
   }
-
-  bool pressed = digitalRead(RESET) == LOW;
 
   if (pressed)
   {
@@ -546,7 +578,8 @@ void checkUploadModeRequest()
     else if (!resetHoldHandled && millis() - resetHoldStart >= UPLOAD_MODE_HOLD_MS)
     {
       resetHoldHandled = true;
-      Serial.println("upload mode removed");
+      Serial.println("Starting SD-card Wi-Fi update mode");
+      startUploadMode();
     }
   }
   else
@@ -601,7 +634,7 @@ void setup()
                 SD.cardType(),
                 SD.cardSize() / (1024ULL * 1024ULL));
 
-  scanVoiceNodes("/", 0);
+  scanVoiceNodeDirectories();
   Serial.printf("Loaded %u voice node metadata entries\n", voiceNodeCount);
 
   // Setup I2S
@@ -623,9 +656,7 @@ void loop()
 
   if (uploadMode)
   {
-    dnsServer.processNextRequest();
-    server.handleClient();
-    ArduinoOTA.handle();
+    delay(5);
     return;
   }
 
@@ -657,6 +688,7 @@ void loop()
 
         if (isdigit(key))
         {
+          playKeyTone(key);
           handleKeypadDigit(key);
         }
 
@@ -675,8 +707,20 @@ void loop()
   readSwitches();
   confirmKeypadBufferAfterTimeout();
 
-  if (audioActive)
+  if (audioActive || keyToneActive)
   {
     audio.loop();
+  }
+}
+
+void audio_eof_mp3(const char *info)
+{
+  if (keyToneActive)
+  {
+    keyToneActive = false;
+  }
+  else if (audioActive)
+  {
+    audioActive = false;
   }
 }

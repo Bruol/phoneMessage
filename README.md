@@ -70,11 +70,11 @@ Libraries:
 
 ## Audio Files
 
-Copy WAV files to the microSD card with a JSON metadata file next to each WAV file. The metadata file must use the same base name as the audio file:
+Copy MP3 files into the `/long` directory on the microSD card with a JSON metadata file next to each MP3 file. The metadata file must use the same base name as the audio file:
 
 ```text
-/Lorin_Urbantat.wav
-/Lorin_Urbantat.json
+/long/Lorin_Urbantat.mp3
+/long/Lorin_Urbantat.json
 ```
 
 The JSON metadata must contain a `number` field with the 2- or 3-digit keypad number for that voice node:
@@ -93,14 +93,16 @@ Numeric values also work:
 }
 ```
 
-At startup, the firmware scans the SD card for `.wav` files, looks for matching `.json` files, parses each `number`, and maps that keypad number to the WAV file. Enter the mapped 2- or 3-digit number on the keypad; after a short pause with no new digit pressed, the firmware confirms the entered number and starts the matching voice node. The reset switch clears the entered number and stops playback.
+At startup, the firmware scans only `/long` for `.mp3` files, ignores hidden files whose names start with `.`, looks for matching `.json` files, parses each `number`, and maps that keypad number to the MP3 file. Enter the mapped 2- or 3-digit number on the keypad; after a short pause with no new digit pressed, the firmware confirms the entered number and starts the matching voice node. The reset switch clears the entered number and stops playback.
 
-The `Voice Notes/` folder contains source voice-note assets and converted WAV files that can be copied to the microSD card.
+The `voice_notes/` folder contains source voice-note assets and converted MP3 files that can be copied to the microSD card.
+
+Keypad digit tones are loaded from `/keys/<digit>.mp3` on the microSD card, for example `/keys/1.mp3`. The tone starts on each digit press when no voice message is currently playing.
 
 ## Usage
 
 1. Wire the ESP32, keypad, microSD module, and I2S audio output using the pin tables above.
-2. Place the target WAV file at the root of the microSD card.
+2. Place target MP3 files and matching JSON metadata files under `/long` on the microSD card.
 3. Install PlatformIO.
 4. Build and upload:
 
@@ -122,37 +124,29 @@ Double press the reset input on GPIO 21, then press a keypad number to set the v
 
 ## SD Card Upload Mode
 
-On startup the ESP32 leaves Wi-Fi in station mode and runs the normal phone-message player. To edit the SD card over Wi-Fi, press and hold the reset input on GPIO 21 for 5 seconds.
+On startup the ESP32 leaves Wi-Fi disconnected and runs the normal phone-message player. To edit the SD card over Wi-Fi, press and hold the reset input on GPIO 21 for 5 seconds.
 
-The firmware stops playback and starts an open access point:
+Upload mode stops playback and exposes the SD card through the `ESPWebFileManager` web interface. The page lists SD-card contents and supports file and folder operations such as upload, download, create, and delete.
 
-```text
-PhoneMessage Upload
-```
+### Existing Wi-Fi Network
 
-Connect to that network from a phone or computer. The captive portal should open automatically; if it does not, browse to:
-
-```text
-http://192.168.4.1/
-```
-
-The portal lists the SD card contents, lets you download or delete existing files, and uploads new files to the SD card root.
-
-## OTA Firmware Updates
-
-The upload-mode access point also runs ArduinoOTA, so PlatformIO can upload firmware directly over Wi-Fi.
-
-1. Hold the reset input on GPIO 21 for 5 seconds.
-2. Connect your computer to the `PhoneMessage Upload` Wi-Fi network.
-3. In PlatformIO, select the `esp32dev_ota` environment and run Upload.
-
-From the terminal:
+Upload mode only works on an existing Wi-Fi network. Build the `esp32dev_wifi` environment with these environment variables set:
 
 ```sh
-pio run -e esp32dev_ota --target upload
+export PHONE_MESSAGE_WIFI_SSID='Your Wi-Fi Name'
+export PHONE_MESSAGE_WIFI_PASSWORD='Your Wi-Fi Password'
+pio run -e esp32dev_wifi --target upload
 ```
 
-The USB upload environment remains `esp32dev`.
+Then hold the reset input for 5 seconds. If the ESP32 connects successfully, the serial monitor prints the file manager address:
+
+```text
+SD-card Wi-Fi update mode is ready: http://192.168.1.42/file
+```
+
+If credentials are missing or the network cannot be reached within 15 seconds, upload mode is not started and the phone-message player remains in normal mode.
+
+Press the reset input again while upload mode is running to stop the web file manager, disconnect Wi-Fi, rescan SD-card metadata, and return to normal phone-message playback mode.
 
 ## Project Layout
 
