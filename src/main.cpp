@@ -31,6 +31,14 @@
 
 const byte DEFAULT_VOLUME_LEVEL = 5;
 const char *DIAL_OUT_BEEP_PATH = "/dial_out_beep.mp3";
+const byte SHORT_CATEGORY_MIN = 1;
+const byte SHORT_CATEGORY_MAX = 5;
+const char *SHORT_CATEGORY_NAMES[] = {
+    "wanna feel beautiful?",
+    "wanna feel loved?",
+    "wanna feel smart?",
+    "wanna feel seen?",
+    "wanna laugh?"};
 
 #ifndef WIFI_SSID
 #define WIFI_SSID "co_werk_5"
@@ -41,6 +49,7 @@ const char *DIAL_OUT_BEEP_PATH = "/dial_out_beep.mp3";
 #endif
 
 #define MAX_VOICE_NODES 64
+#define MAX_SHORT_VOICE_NOTES 128
 #define MAX_AUDIO_PATH_LENGTH 96
 #define MAX_METADATA_BYTES 512
 #define MAX_SCAN_DEPTH 4
@@ -92,7 +101,8 @@ void clearKeypadBuffer();
 void stopPlayback();
 void startUploadMode();
 void stopUploadMode();
-void scanVoiceNodes(const char *directoryPath, byte depth);
+void scanLongVoiceNodes(const char *directoryPath, byte depth);
+void scanShortVoiceNotes(const char *directoryPath, byte depth);
 void scanVoiceNodeDirectories();
 void playKeyTone(char digit);
 void playDialOutBeep();
@@ -185,8 +195,16 @@ struct VoiceNode
   char audioPath[MAX_AUDIO_PATH_LENGTH];
 };
 
+struct ShortVoiceNote
+{
+  byte categoryMask;
+  char audioPath[MAX_AUDIO_PATH_LENGTH];
+};
+
 VoiceNode voiceNodes[MAX_VOICE_NODES];
+ShortVoiceNote shortVoiceNotes[MAX_SHORT_VOICE_NOTES];
 byte voiceNodeCount = 0;
+byte shortVoiceNoteCount = 0;
 char keypadBuffer[4] = "";
 byte keypadBufferLength = 0;
 unsigned long lastKeypadDigitMs = 0;
@@ -209,8 +227,9 @@ void stopUploadMode()
   clearKeypadBuffer();
 
   voiceNodeCount = 0;
+  shortVoiceNoteCount = 0;
   scanVoiceNodeDirectories();
-  Serial.printf("Reloaded %u voice node metadata entries\n", voiceNodeCount);
+  Serial.printf("Reloaded %u long voice nodes and %u short voice notes\n", voiceNodeCount, shortVoiceNoteCount);
 }
 
 bool endsWithIgnoreCase(const char *text, const char *suffix)
@@ -299,7 +318,7 @@ void clearKeypadBuffer()
   lastKeypadDigitMs = 0;
 }
 
-bool parseNumberMetadata(const char *metadataPath, char *number, size_t numberSize)
+bool readMetadata(const char *metadataPath, char *buffer, size_t bufferSize)
 {
   File metadata = SD.open(metadataPath, FILE_READ);
   if (!metadata)
@@ -308,10 +327,32 @@ bool parseNumberMetadata(const char *metadataPath, char *number, size_t numberSi
     return false;
   }
 
-  char buffer[MAX_METADATA_BYTES + 1];
-  size_t bytesRead = metadata.readBytes(buffer, MAX_METADATA_BYTES);
+  size_t bytesRead = metadata.readBytes(buffer, bufferSize - 1);
   metadata.close();
   buffer[bytesRead] = '\0';
+  return true;
+}
+
+bool replaceExtension(const char *audioPath, const char *metadataSuffix, char *metadataPath, size_t metadataPathSize)
+{
+  strlcpy(metadataPath, audioPath, metadataPathSize);
+  char *extension = strrchr(metadataPath, '.');
+  if (!extension)
+  {
+    return false;
+  }
+
+  strlcpy(extension, metadataSuffix, metadataPathSize - (extension - metadataPath));
+  return true;
+}
+
+bool parseNumberMetadata(const char *metadataPath, char *number, size_t numberSize)
+{
+  char buffer[MAX_METADATA_BYTES + 1];
+  if (!readMetadata(metadataPath, buffer, sizeof(buffer)))
+  {
+    return false;
+  }
 
   char *key = strstr(buffer, "\"number\"");
   if (!key)
@@ -354,6 +395,89 @@ bool parseNumberMetadata(const char *metadataPath, char *number, size_t numberSi
   return true;
 }
 
+bool parseShortCategoryMetadata(const char *metadataPath, byte *categoryMask)
+{
+  char buffer[MAX_METADATA_BYTES + 1];
+  if (!readMetadata(metadataPath, buffer, sizeof(buffer)))
+  {
+    return false;
+  }
+
+  byte mask = 0;
+  bool usesTags = true;
+  char *field = strstr(buffer, "\"tags\"");
+  if (!field)
+  {
+    field = strstr(buffer, "tags");
+  }
+  if (!field)
+  {
+    usesTags = false;
+    field = strstr(buffer, "\"category\"");
+  }
+  if (!field)
+  {
+    usesTags = false;
+    field = strstr(buffer, "category");
+  }
+
+  if (!field)
+  {
+    Serial.printf("Short metadata missing category/tags: %s\n", metadataPath);
+    return false;
+  }
+
+  char *value = strchr(field, ':');
+  if (!value)
+  {
+    Serial.printf("Short metadata has invalid category/tags field: %s\n", metadataPath);
+    return false;
+  }
+
+  char *scanStart = value + 1;
+  char *scanEnd = scanStart;
+  if (usesTags)
+  {
+    scanStart = strchr(value, '[');
+    scanEnd = scanStart ? strchr(scanStart, ']') : nullptr;
+  }
+  else
+  {
+    while (*scanEnd && *scanEnd != '\n' && *scanEnd != '\r' && *scanEnd != ',' && *scanEnd != '}')
+    {
+      scanEnd++;
+    }
+  }
+
+  if (!scanStart || !scanEnd)
+  {
+    Serial.printf("Short metadata has invalid category/tags value: %s\n", metadataPath);
+    return false;
+  }
+
+  while (scanStart < scanEnd)
+  {
+    if (isdigit(*scanStart))
+    {
+      byte category = *scanStart - '0';
+      if (category >= SHORT_CATEGORY_MIN && category <= SHORT_CATEGORY_MAX)
+      {
+        mask |= 1 << (category - 1);
+      }
+    }
+    scanStart++;
+  }
+
+  if (mask == 0)
+  {
+    Serial.printf("Short metadata has no category 1-5: %s\n", metadataPath);
+    return false;
+  }
+
+  *categoryMask = mask;
+  return true;
+}
+
 void addVoiceNode(const char *audioPath)
 {
   if (voiceNodeCount >= MAX_VOICE_NODES)
@@ -363,14 +487,10 @@ void addVoiceNode(const char *audioPath)
   }
 
   char metadataPath[MAX_AUDIO_PATH_LENGTH];
-  strlcpy(metadataPath, audioPath, sizeof(metadataPath));
-
-  char *extension = strrchr(metadataPath, '.');
-  if (!extension)
+  if (!replaceExtension(audioPath, ".json", metadataPath, sizeof(metadataPath)))
   {
     return;
   }
-  strlcpy(extension, ".json", sizeof(metadataPath) - (extension - metadataPath));
 
   char number[4];
   if (!parseNumberMetadata(metadataPath, number, sizeof(number)))
@@ -385,7 +505,39 @@ void addVoiceNode(const char *audioPath)
   voiceNodeCount++;
 }
 
-void scanVoiceNodes(const char *directoryPath, byte depth)
+void addShortVoiceNote(const char *audioPath)
+{
+  if (shortVoiceNoteCount >= MAX_SHORT_VOICE_NOTES)
+  {
+    Serial.printf("Short voice note limit reached; skipping %s\n", audioPath);
+    return;
+  }
+
+  char metadataPath[MAX_AUDIO_PATH_LENGTH];
+  if (!replaceExtension(audioPath, ".metadata.json", metadataPath, sizeof(metadataPath)))
+  {
+    return;
+  }
+
+  if (!SD.exists(metadataPath) && !replaceExtension(audioPath, ".json", metadataPath, sizeof(metadataPath)))
+  {
+    return;
+  }
+
+  byte categoryMask = 0;
+  if (!parseShortCategoryMetadata(metadataPath, &categoryMask))
+  {
+    return;
+  }
+
+  shortVoiceNotes[shortVoiceNoteCount].categoryMask = categoryMask;
+  strlcpy(shortVoiceNotes[shortVoiceNoteCount].audioPath, audioPath, sizeof(shortVoiceNotes[shortVoiceNoteCount].audioPath));
+
+  Serial.printf("Mapped short note categories 0x%02x to %s\n", categoryMask, shortVoiceNotes[shortVoiceNoteCount].audioPath);
+  shortVoiceNoteCount++;
+}
+
+void scanLongVoiceNodes(const char *directoryPath, byte depth)
 {
   if (depth > MAX_SCAN_DEPTH)
   {
@@ -416,7 +568,7 @@ void scanVoiceNodes(const char *directoryPath, byte depth)
 
     if (entry.isDirectory())
     {
-      scanVoiceNodes(entryPath, depth + 1);
+      scanLongVoiceNodes(entryPath, depth + 1);
     }
     else if (endsWithIgnoreCase(entryPath, ".mp3"))
     {
@@ -429,9 +581,54 @@ void scanVoiceNodes(const char *directoryPath, byte depth)
   directory.close();
 }
 
+void scanShortVoiceNotes(const char *directoryPath, byte depth)
+{
+  if (depth > MAX_SCAN_DEPTH)
+  {
+    return;
+  }
+
+  File directory = SD.open(directoryPath);
+  if (!directory || !directory.isDirectory())
+  {
+    Serial.printf("Could not open directory: %s\n", directoryPath);
+    return;
+  }
+
+  while (true)
+  {
+    File entry = directory.openNextFile();
+    if (!entry)
+    {
+      break;
+    }
+
+    const char *entryPath = entry.path();
+    if (isHiddenPath(entryPath))
+    {
+      entry.close();
+      continue;
+    }
+
+    if (entry.isDirectory())
+    {
+      scanShortVoiceNotes(entryPath, depth + 1);
+    }
+    else if (endsWithIgnoreCase(entryPath, ".mp3"))
+    {
+      addShortVoiceNote(entryPath);
+    }
+
+    entry.close();
+  }
+
+  directory.close();
+}
+
 void scanVoiceNodeDirectories()
 {
-  scanVoiceNodes("/long", 0);
+  scanLongVoiceNodes("/long", 0);
+  scanShortVoiceNotes("/short", 0);
 }
 
 const VoiceNode *findVoiceNode(const char *number)
@@ -447,8 +644,64 @@ const VoiceNode *findVoiceNode(const char *number)
   return nullptr;
 }
 
+bool playRandomShortVoiceNote(byte category)
+{
+  if (category < SHORT_CATEGORY_MIN || category > SHORT_CATEGORY_MAX)
+  {
+    return false;
+  }
+
+  const char *categoryName = SHORT_CATEGORY_NAMES[category - SHORT_CATEGORY_MIN];
+  byte categoryBit = 1 << (category - 1);
+  byte matchCount = 0;
+  for (byte i = 0; i < shortVoiceNoteCount; i++)
+  {
+    if (shortVoiceNotes[i].categoryMask & categoryBit)
+    {
+      matchCount++;
+    }
+  }
+
+  if (matchCount == 0)
+  {
+    return false;
+  }
+
+  byte selectedMatch = random(matchCount);
+  for (byte i = 0; i < shortVoiceNoteCount; i++)
+  {
+    if (!(shortVoiceNotes[i].categoryMask & categoryBit))
+    {
+      continue;
+    }
+
+    if (selectedMatch == 0)
+    {
+      stopKeyTone();
+      Serial.printf("Playing random short note from category %u (%s): %s\n",
+                    category,
+                    categoryName,
+                    shortVoiceNotes[i].audioPath);
+      startPlayback(shortVoiceNotes[i].audioPath);
+      clearKeypadBuffer();
+      return true;
+    }
+    selectedMatch--;
+  }
+
+  return false;
+}
+
 bool playBufferedNumber()
 {
+  if (keypadBufferLength == 1 &&
+      keypadBuffer[0] >= '1' &&
+      keypadBuffer[0] <= '5' &&
+      playRandomShortVoiceNote(keypadBuffer[0] - '0'))
+  {
+    return true;
+  }
+
   const VoiceNode *voiceNode = findVoiceNode(keypadBuffer);
   if (!voiceNode)
   {
@@ -627,6 +880,7 @@ void setup()
   // Start Serial Port
   Serial.begin(115200);
   delay(1000);
+  randomSeed((uint32_t)esp_random());
 
   // Set microSD Card CS as OUTPUT and set HIGH
   pinMode(SD_CS, OUTPUT);
@@ -652,7 +906,7 @@ void setup()
                 SD.cardSize() / (1024ULL * 1024ULL));
 
   scanVoiceNodeDirectories();
-  Serial.printf("Loaded %u voice node metadata entries\n", voiceNodeCount);
+  Serial.printf("Loaded %u long voice nodes and %u short voice notes\n", voiceNodeCount, shortVoiceNoteCount);
 
   // Setup I2S
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);

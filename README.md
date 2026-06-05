@@ -93,7 +93,15 @@ Numeric values also work:
 }
 ```
 
-At startup, the firmware scans only `/long` for `.mp3` files, ignores hidden files whose names start with `.`, looks for matching `.json` files, parses each `number`, and maps that keypad number to the MP3 file. Enter the mapped 2- or 3-digit number on the keypad; after a short pause with no new digit pressed, the firmware confirms the entered number and starts the matching voice node. The reset switch clears the entered number and stops playback.
+At startup, the firmware scans `/long` for direct-dial voice notes and `/short` for categorized short voice notes. Hidden files whose names start with `.` are ignored.
+
+Long voice notes use matching `.json` files with a `number` field. Enter the mapped 2- or 3-digit number on the keypad; after a short pause with no new digit pressed, the firmware confirms the entered number and starts the matching voice node.
+
+Short voice notes use matching `.metadata.json` files with `tags` such as `[1, 4]`, or a `category` field. Keypad digits `1` through `5` select the matching short-note category and play a random note from that category. A short note can belong to multiple categories.
+
+Short category names are logged over serial when selected: `1` is `wanna feel beautiful?`, `2` is `wanna feel loved?`, `3` is `wanna feel smart?`, `4` is `wanna feel seen?`, and `5` is `wanna laugh?`.
+
+The reset switch clears the entered number and stops playback.
 
 The `voice_notes/` folder contains source voice-note assets and converted MP3 files that can be copied to the microSD card.
 
@@ -104,7 +112,7 @@ If the entered keypad number is not assigned to a voice message, the firmware pl
 ## Usage
 
 1. Wire the ESP32, keypad, microSD module, and I2S audio output using the pin tables above.
-2. Place target MP3 files and matching JSON metadata files under `/long` on the microSD card.
+2. Place direct-dial MP3 files and matching JSON metadata files under `/long` on the microSD card. Place categorized short MP3 files and matching `.metadata.json` files under `/short`.
 3. Install PlatformIO.
 4. Build and upload:
 
