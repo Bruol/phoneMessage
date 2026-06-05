@@ -10,6 +10,7 @@
 #include "WebServer.h"
 #include "DNSServer.h"
 #include "ArduinoOTA.h"
+#include <ESPWebDAV.h>
 
 // microSD Card Reader connections
 #define SD_CS 5
@@ -29,7 +30,6 @@
 #define UPLOAD_MODE_HOLD_MS 5000
 #define RESET_DOUBLE_PRESS_MS 700
 
-const char *UPLOAD_AP_SSID = "PhoneMessage Upload";
 const char *OTA_HOSTNAME = "phone-message";
 const byte DNS_PORT = 53;
 const byte DEFAULT_VOLUME_LEVEL = 5;
@@ -219,84 +219,6 @@ void handleUpload()
       uploadFile.close();
     }
   }
-}
-
-void startUploadMode()
-{
-  if (uploadMode)
-  {
-    return;
-  }
-
-  uploadMode = true;
-  activeInputs = 0;
-  clearKeypadBuffer();
-  stopPlayback();
-
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(UPLOAD_AP_SSID);
-
-  IPAddress apIp = WiFi.softAPIP();
-  dnsServer.start(DNS_PORT, "*", apIp);
-
-  ArduinoOTA.setHostname(OTA_HOSTNAME);
-  ArduinoOTA
-      .onStart([]()
-               {
-                 Serial.println("OTA firmware update started");
-                 audio.stopSong();
-               })
-      .onEnd([]()
-             {
-               Serial.println("\nOTA firmware update finished");
-             })
-      .onError([](ota_error_t error)
-               {
-                 Serial.printf("OTA error %u\n", error);
-               });
-  ArduinoOTA.begin();
-
-  server.on("/", HTTP_GET, sendIndex);
-  server.on("/generate_204", HTTP_GET, sendIndex);
-  server.on("/fwlink", HTTP_GET, sendIndex);
-  server.on("/hotspot-detect.html", HTTP_GET, sendIndex);
-  server.on("/upload", HTTP_POST, []()
-            {
-              server.sendHeader("Location", "/");
-              server.send(303);
-            },
-            handleUpload);
-  server.on("/delete", HTTP_POST, []()
-            {
-              String path = normalizePath(server.arg("path"));
-              if (path != "/" && SD.exists(path))
-              {
-                SD.remove(path);
-              }
-              server.sendHeader("Location", "/");
-              server.send(303);
-            });
-  server.on("/file", HTTP_GET, []()
-            {
-              String path = normalizePath(server.arg("path"));
-              if (!SD.exists(path))
-              {
-                server.send(404, "text/plain", "File not found");
-                return;
-              }
-
-              File file = SD.open(path, FILE_READ);
-              server.streamFile(file, "application/octet-stream");
-              file.close();
-            });
-  server.onNotFound(sendIndex);
-  server.begin();
-
-  Serial.printf("Upload mode started. Connect to Wi-Fi \"%s\" and open http://%s/\n",
-                UPLOAD_AP_SSID,
-                apIp.toString().c_str());
-  Serial.printf("PlatformIO OTA target: %s at %s\n", OTA_HOSTNAME, apIp.toString().c_str());
 }
 
 void setVolumeLevel(byte level)
