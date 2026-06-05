@@ -905,14 +905,16 @@ void setup()
                 SD.cardType(),
                 SD.cardSize() / (1024ULL * 1024ULL));
 
-  scanVoiceNodeDirectories();
-  Serial.printf("Loaded %u long voice nodes and %u short voice notes\n", voiceNodeCount, shortVoiceNoteCount);
-
   // Setup I2S
   audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
 
   // Set Volume
   setVolumeLevel(DEFAULT_VOLUME_LEVEL);
+  audio.stopSong();
+
+  scanVoiceNodeDirectories();
+  audio.stopSong();
+  Serial.printf("Loaded %u long voice nodes and %u short voice notes\n", voiceNodeCount, shortVoiceNoteCount);
 
   keypad.setDebounceTime(50);
   keypad.setHoldTime(500);
