@@ -10,7 +10,6 @@
 #include "WebServer.h"
 #include "DNSServer.h"
 #include "ArduinoOTA.h"
-#include <ESPWebDAV.h>
 
 // microSD Card Reader connections
 #define SD_CS 5
@@ -46,7 +45,6 @@ const byte COLS = 3;
 char keys[ROWS][COLS] = {
     {'1', '2', '3'},
     {'4', '5', '6'},
-
     {'7', '8', '9'},
     {'*', '0', '#'}};
 
@@ -332,9 +330,9 @@ bool parseNumberMetadata(const char *metadataPath, char *number, size_t numberSi
   }
   number[digitCount] = '\0';
 
-  if (digitCount < 2 || digitCount > 3)
+  if (digitCount < 1 || digitCount > 3)
   {
-    Serial.printf("Metadata number must be 2 or 3 digits: %s\n", metadataPath);
+    Serial.printf("Metadata number must be between 1 and 3 digits: %s\n", metadataPath);
     return false;
   }
 
@@ -399,7 +397,7 @@ void scanVoiceNodes(const char *directoryPath, byte depth)
     {
       scanVoiceNodes(entryPath, depth + 1);
     }
-    else if (endsWithIgnoreCase(entryPath, ".wav"))
+    else if (endsWithIgnoreCase(entryPath, ".mp3"))
     {
       addVoiceNode(entryPath);
     }
@@ -457,7 +455,7 @@ void confirmKeypadBufferAfterTimeout()
     return;
   }
 
-  if (keypadBufferLength < 2)
+  if (keypadBufferLength < 1)
   {
     Serial.printf("Ignoring incomplete keypad number: %s\n", keypadBuffer);
     clearKeypadBuffer();
@@ -548,7 +546,7 @@ void checkUploadModeRequest()
     else if (!resetHoldHandled && millis() - resetHoldStart >= UPLOAD_MODE_HOLD_MS)
     {
       resetHoldHandled = true;
-      startUploadMode();
+      Serial.println("upload mode removed");
     }
   }
   else
