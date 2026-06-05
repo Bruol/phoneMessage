@@ -97,7 +97,7 @@ At startup, the firmware scans only `/long` for `.mp3` files, ignores hidden fil
 
 The `voice_notes/` folder contains source voice-note assets and converted MP3 files that can be copied to the microSD card.
 
-Keypad digit tones are loaded from `/keys/<digit>.mp3` on the microSD card, for example `/keys/1.mp3`. The tone starts on each digit press when no voice message is currently playing.
+Keypad digit tones are loaded from `/keys/<digit>.wav` on the microSD card, for example `/keys/1.wav`. Keypad digits are still mapped to 1-indexed tone files, so key `0` plays `/keys/1.wav`, key `1` plays `/keys/2.wav`, and key `9` plays `/keys/10.wav`.
 
 If the entered keypad number is not assigned to a voice message, the firmware plays `/dial_out_beep.mp3`.
 

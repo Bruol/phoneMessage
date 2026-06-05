@@ -45,7 +45,8 @@ const char *DIAL_OUT_BEEP_PATH = "/dial_out_beep.mp3";
 #define MAX_METADATA_BYTES 512
 #define MAX_SCAN_DEPTH 4
 #define KEYPAD_CONFIRM_TIMEOUT_MS 1200
-#define KEY_TONE_PATH_LENGTH 17
+#define KEY_TONE_PATH_LENGTH 18
+
 
 const byte ROWS = 4;
 const byte COLS = 3;
@@ -267,8 +268,13 @@ void startPlayback(const char *audioPath)
 void playKeyTone(char digit)
 {
   byte toneNumber = (digit - '0') + 1;
+  if (toneNumber < 1 || toneNumber > 10)
+  {
+    return;
+  }
+
   char tonePath[KEY_TONE_PATH_LENGTH];
-  snprintf(tonePath, sizeof(tonePath), "/keys/%u.mp3", toneNumber);
+  snprintf(tonePath, sizeof(tonePath), "/keys/%u.wav", toneNumber);
 
   audio.stopSong();
   audioActive = false;
