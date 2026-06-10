@@ -51,7 +51,7 @@ const char *SHORT_CATEGORY_NAMES[] = {
 #define MAX_VOICE_NODES 64
 #define MAX_SHORT_VOICE_NOTES 128
 #define MAX_AUDIO_PATH_LENGTH 96
-#define MAX_METADATA_BYTES 512
+#define MAX_METADATA_BYTES 8192
 #define MAX_SCAN_DEPTH 4
 #define KEYPAD_CONFIRM_TIMEOUT_MS 1200
 #define KEY_TONE_PATH_LENGTH 18
@@ -101,8 +101,8 @@ void clearKeypadBuffer();
 void stopPlayback();
 void startUploadMode();
 void stopUploadMode();
-void scanLongVoiceNodes(const char *directoryPath, byte depth);
-void scanShortVoiceNotes(const char *directoryPath, byte depth);
+void scanLongVoiceNodes(const char *directoryPath);
+void scanShortVoiceNotes(const char *directoryPath);
 void scanVoiceNodeDirectories();
 void playKeyTone(char digit);
 void playDialOutBeep();
@@ -333,43 +333,47 @@ bool readMetadata(const char *metadataPath, char *buffer, size_t bufferSize)
   return true;
 }
 
-bool replaceExtension(const char *audioPath, const char *metadataSuffix, char *metadataPath, size_t metadataPathSize)
+bool readJsonString(char **cursor, char *value, size_t valueSize)
 {
-  strlcpy(metadataPath, audioPath, metadataPathSize);
-  char *extension = strrchr(metadataPath, '.');
-  if (!extension)
+  char *start = strchr(*cursor, '"');
+  if (!start)
   {
     return false;
   }
 
-  strlcpy(extension, metadataSuffix, metadataPathSize - (extension - metadataPath));
+  start++;
+  char *out = value;
+  size_t remaining = valueSize;
+  while (*start && *start != '"')
+  {
+    if (*start == '\\' && start[1])
+    {
+      start++;
+    }
+
+    if (remaining > 1)
+    {
+      *out++ = *start;
+      remaining--;
+    }
+    start++;
+  }
+
+  if (*start != '"')
+  {
+    return false;
+  }
+
+  *out = '\0';
+  *cursor = start + 1;
   return true;
 }
 
-bool parseNumberMetadata(const char *metadataPath, char *number, size_t numberSize)
+bool readJsonNumberValue(char **cursor, char *number, size_t numberSize)
 {
-  char buffer[MAX_METADATA_BYTES + 1];
-  if (!readMetadata(metadataPath, buffer, sizeof(buffer)))
-  {
-    return false;
-  }
-
-  char *key = strstr(buffer, "\"number\"");
-  if (!key)
-  {
-    key = strstr(buffer, "number");
-  }
-
-  if (!key)
-  {
-    Serial.printf("Metadata missing number: %s\n", metadataPath);
-    return false;
-  }
-
-  char *value = strchr(key, ':');
+  char *value = strchr(*cursor, ':');
   if (!value)
   {
-    Serial.printf("Metadata has invalid number field: %s\n", metadataPath);
     return false;
   }
 
@@ -388,113 +392,36 @@ bool parseNumberMetadata(const char *metadataPath, char *number, size_t numberSi
 
   if (digitCount < 1 || digitCount > 3)
   {
-    Serial.printf("Metadata number must be between 1 and 3 digits: %s\n", metadataPath);
     return false;
   }
 
+  *cursor = value;
   return true;
 }
 
-bool parseShortCategoryMetadata(const char *metadataPath, byte *categoryMask)
+bool readJsonPathValue(char **cursor, char *path, size_t pathSize)
 {
-  char buffer[MAX_METADATA_BYTES + 1];
-  if (!readMetadata(metadataPath, buffer, sizeof(buffer)))
-  {
-    return false;
-  }
-
-  byte mask = 0;
-  bool usesTags = true;
-  char *field = strstr(buffer, "\"tags\"");
-  if (!field)
-  {
-    field = strstr(buffer, "tags");
-  }
-  if (!field)
-  {
-    usesTags = false;
-    field = strstr(buffer, "\"category\"");
-  }
-  if (!field)
-  {
-    usesTags = false;
-    field = strstr(buffer, "category");
-  }
-
-  if (!field)
-  {
-    Serial.printf("Short metadata missing category/tags: %s\n", metadataPath);
-    return false;
-  }
-
-  char *value = strchr(field, ':');
+  char *value = strchr(*cursor, ':');
   if (!value)
   {
-    Serial.printf("Short metadata has invalid category/tags field: %s\n", metadataPath);
     return false;
   }
+  value++;
 
-  char *scanStart = value + 1;
-  char *scanEnd = scanStart;
-  if (usesTags)
+  while (*value == ' ' || *value == '\t' || *value == '\r' || *value == '\n')
   {
-    scanStart = strchr(value, '[');
-    scanEnd = scanStart ? strchr(scanStart, ']') : nullptr;
-  }
-  else
-  {
-    while (*scanEnd && *scanEnd != '\n' && *scanEnd != '\r' && *scanEnd != ',' && *scanEnd != '}')
-    {
-      scanEnd++;
-    }
+    value++;
   }
 
-  if (!scanStart || !scanEnd)
-  {
-    Serial.printf("Short metadata has invalid category/tags value: %s\n", metadataPath);
-    return false;
-  }
-
-  while (scanStart < scanEnd)
-  {
-    if (isdigit(*scanStart))
-    {
-      byte category = *scanStart - '0';
-      if (category >= SHORT_CATEGORY_MIN && category <= SHORT_CATEGORY_MAX)
-      {
-        mask |= 1 << (category - 1);
-      }
-    }
-    scanStart++;
-  }
-
-  if (mask == 0)
-  {
-    Serial.printf("Short metadata has no category 1-5: %s\n", metadataPath);
-    return false;
-  }
-
-  *categoryMask = mask;
-  return true;
+  *cursor = value;
+  return readJsonString(cursor, path, pathSize);
 }
 
-void addVoiceNode(const char *audioPath)
+void addVoiceNodeMapping(const char *number, const char *audioPath)
 {
   if (voiceNodeCount >= MAX_VOICE_NODES)
   {
     Serial.printf("Voice node limit reached; skipping %s\n", audioPath);
-    return;
-  }
-
-  char metadataPath[MAX_AUDIO_PATH_LENGTH];
-  if (!replaceExtension(audioPath, ".json", metadataPath, sizeof(metadataPath)))
-  {
-    return;
-  }
-
-  char number[4];
-  if (!parseNumberMetadata(metadataPath, number, sizeof(number)))
-  {
     return;
   }
 
@@ -505,7 +432,7 @@ void addVoiceNode(const char *audioPath)
   voiceNodeCount++;
 }
 
-void addShortVoiceNote(const char *audioPath)
+void addShortVoiceNoteMapping(byte category, const char *audioPath)
 {
   if (shortVoiceNoteCount >= MAX_SHORT_VOICE_NOTES)
   {
@@ -513,122 +440,114 @@ void addShortVoiceNote(const char *audioPath)
     return;
   }
 
-  char metadataPath[MAX_AUDIO_PATH_LENGTH];
-  if (!replaceExtension(audioPath, ".metadata.json", metadataPath, sizeof(metadataPath)))
+  if (category < SHORT_CATEGORY_MIN || category > SHORT_CATEGORY_MAX)
   {
     return;
   }
 
-  if (!SD.exists(metadataPath) && !replaceExtension(audioPath, ".json", metadataPath, sizeof(metadataPath)))
-  {
-    return;
-  }
-
-  byte categoryMask = 0;
-  if (!parseShortCategoryMetadata(metadataPath, &categoryMask))
-  {
-    return;
-  }
-
-  shortVoiceNotes[shortVoiceNoteCount].categoryMask = categoryMask;
+  shortVoiceNotes[shortVoiceNoteCount].categoryMask = 1 << (category - 1);
   strlcpy(shortVoiceNotes[shortVoiceNoteCount].audioPath, audioPath, sizeof(shortVoiceNotes[shortVoiceNoteCount].audioPath));
 
-  Serial.printf("Mapped short note categories 0x%02x to %s\n", categoryMask, shortVoiceNotes[shortVoiceNoteCount].audioPath);
+  Serial.printf("Mapped short note category %u to %s\n", category, shortVoiceNotes[shortVoiceNoteCount].audioPath);
   shortVoiceNoteCount++;
 }
 
-void scanLongVoiceNodes(const char *directoryPath, byte depth)
+void scanLongVoiceNodes(const char *directoryPath)
 {
-  if (depth > MAX_SCAN_DEPTH)
+  char metadataPath[MAX_AUDIO_PATH_LENGTH];
+  snprintf(metadataPath, sizeof(metadataPath), "%s/metadata.json", directoryPath);
+
+  char buffer[MAX_METADATA_BYTES + 1];
+  if (!readMetadata(metadataPath, buffer, sizeof(buffer)))
   {
     return;
   }
 
-  File directory = SD.open(directoryPath);
-  if (!directory || !directory.isDirectory())
+  char *cursor = buffer;
+  while ((cursor = strstr(cursor, "\"number\"")) != nullptr)
   {
-    Serial.printf("Could not open directory: %s\n", directoryPath);
-    return;
-  }
-
-  while (true)
-  {
-    File entry = directory.openNextFile();
-    if (!entry)
+    char number[4];
+    if (!readJsonNumberValue(&cursor, number, sizeof(number)))
     {
-      break;
-    }
-
-    const char *entryPath = entry.path();
-    if (isHiddenPath(entryPath))
-    {
-      entry.close();
+      Serial.printf("Long metadata has invalid number near: %.24s\n", cursor);
+      cursor++;
       continue;
     }
 
-    if (entry.isDirectory())
+    char *pathField = strstr(cursor, "\"path\"");
+    if (!pathField)
     {
-      scanLongVoiceNodes(entryPath, depth + 1);
-    }
-    else if (endsWithIgnoreCase(entryPath, ".mp3"))
-    {
-      addVoiceNode(entryPath);
+      Serial.printf("Long metadata missing path for number %s\n", number);
+      break;
     }
 
-    entry.close();
+    cursor = pathField;
+    char audioPath[MAX_AUDIO_PATH_LENGTH];
+    if (!readJsonPathValue(&cursor, audioPath, sizeof(audioPath)))
+    {
+      Serial.printf("Long metadata has invalid path for number %s\n", number);
+      continue;
+    }
+
+    addVoiceNodeMapping(number, audioPath);
   }
-
-  directory.close();
 }
 
-void scanShortVoiceNotes(const char *directoryPath, byte depth)
+void scanShortVoiceNotes(const char *directoryPath)
 {
-  if (depth > MAX_SCAN_DEPTH)
+  char metadataPath[MAX_AUDIO_PATH_LENGTH];
+  snprintf(metadataPath, sizeof(metadataPath), "%s/metadata.json", directoryPath);
+
+  char buffer[MAX_METADATA_BYTES + 1];
+  if (!readMetadata(metadataPath, buffer, sizeof(buffer)))
   {
     return;
   }
 
-  File directory = SD.open(directoryPath);
-  if (!directory || !directory.isDirectory())
+  for (byte category = SHORT_CATEGORY_MIN; category <= SHORT_CATEGORY_MAX; category++)
   {
-    Serial.printf("Could not open directory: %s\n", directoryPath);
-    return;
-  }
+    char key[4];
+    snprintf(key, sizeof(key), "\"%u\"", category);
 
-  while (true)
-  {
-    File entry = directory.openNextFile();
-    if (!entry)
+    char *field = strstr(buffer, key);
+    if (!field)
     {
-      break;
-    }
-
-    const char *entryPath = entry.path();
-    if (isHiddenPath(entryPath))
-    {
-      entry.close();
       continue;
     }
 
-    if (entry.isDirectory())
+    char *arrayStart = strchr(field, '[');
+    char *arrayEnd = arrayStart ? strchr(arrayStart, ']') : nullptr;
+    if (!arrayStart || !arrayEnd)
     {
-      scanShortVoiceNotes(entryPath, depth + 1);
-    }
-    else if (endsWithIgnoreCase(entryPath, ".mp3"))
-    {
-      addShortVoiceNote(entryPath);
+      Serial.printf("Short metadata has invalid array for category %u\n", category);
+      continue;
     }
 
-    entry.close();
+    char *cursor = arrayStart + 1;
+    while (cursor < arrayEnd)
+    {
+      char *pathStart = strchr(cursor, '"');
+      if (!pathStart || pathStart >= arrayEnd)
+      {
+        break;
+      }
+
+      cursor = pathStart;
+      char audioPath[MAX_AUDIO_PATH_LENGTH];
+      if (!readJsonString(&cursor, audioPath, sizeof(audioPath)))
+      {
+        break;
+      }
+
+      addShortVoiceNoteMapping(category, audioPath);
+    }
   }
-
-  directory.close();
 }
 
 void scanVoiceNodeDirectories()
 {
-  scanLongVoiceNodes("/long", 0);
-  scanShortVoiceNotes("/short", 0);
+  scanLongVoiceNodes("/long");
+  scanShortVoiceNotes("/short");
 }
 
 const VoiceNode *findVoiceNode(const char *number)
