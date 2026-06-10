@@ -56,7 +56,6 @@ const char *SHORT_CATEGORY_NAMES[] = {
 #define KEYPAD_CONFIRM_TIMEOUT_MS 1200
 #define KEY_TONE_PATH_LENGTH 18
 
-
 const byte ROWS = 4;
 const byte COLS = 3;
 
