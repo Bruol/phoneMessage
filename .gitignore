@@ -2,3 +2,10 @@
 Voice Notes/*
 *.DS_Store
 lib/ESPWebFileManager/*
+!lib/ESPWebFileManager/README.md
+!lib/ESPWebFileManager/library.json
+!lib/ESPWebFileManager/library.properties
+!lib/ESPWebFileManager/LICENCE
+!lib/ESPWebFileManager/keywords.txt
+!lib/ESPWebFileManager/src/
+!lib/ESPWebFileManager/src/**
