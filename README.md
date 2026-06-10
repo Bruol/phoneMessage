@@ -70,34 +70,45 @@ Libraries:
 
 ## Audio Files
 
-Copy MP3 files into the `/long` directory on the microSD card with a JSON metadata file next to each MP3 file. The metadata file must use the same base name as the audio file:
+Copy MP3 files into the `/long` directory on the microSD card with one folder-level metadata file:
 
 ```text
 /long/Lorin_Urbantat.mp3
-/long/Lorin_Urbantat.json
+/long/metadata.json
 ```
 
-The JSON metadata must contain a `number` field with the 2- or 3-digit keypad number for that voice node:
+The long voice-note metadata must be an array of objects. Each object maps a 2- or 3-digit keypad number to an audio path:
 
 ```json
-{
-  "number": "12"
-}
-```
-
-Numeric values also work:
-
-```json
-{
-  "number": 123
-}
+[
+  {
+    "number": 12,
+    "path": "/long/Lorin_Urbantat.mp3"
+  }
+]
 ```
 
 At startup, the firmware scans `/long` for direct-dial voice notes and `/short` for categorized short voice notes. Hidden files whose names start with `.` are ignored.
 
-Long voice notes use matching `.json` files with a `number` field. Enter the mapped 2- or 3-digit number on the keypad; after a short pause with no new digit pressed, the firmware confirms the entered number and starts the matching voice node.
+Long voice notes use `/long/metadata.json`. Enter the mapped 2- or 3-digit number on the keypad; after a short pause with no new digit pressed, the firmware confirms the entered number and starts the matching voice node.
 
-Short voice notes use matching `.metadata.json` files with `tags` such as `[1, 4]`, or a `category` field. Keypad digits `1` through `5` select the matching short-note category and play a random note from that category. A short note can belong to multiple categories.
+Short voice notes use `/short/metadata.json`. The file has one field for each category tag, and each field contains the array of audio paths for that tag:
+
+```json
+{
+  "1": [
+    "/short/Asha_2.mp3"
+  ],
+  "2": [
+    "/short/Asha_1.mp3"
+  ],
+  "3": [],
+  "4": [],
+  "5": []
+}
+```
+
+Keypad digits `1` through `5` select the matching short-note category and play a random note from that category. A short note can belong to multiple categories by appearing in multiple arrays.
 
 Short category names are logged over serial when selected: `1` is `wanna feel beautiful?`, `2` is `wanna feel loved?`, `3` is `wanna feel smart?`, `4` is `wanna feel seen?`, and `5` is `wanna laugh?`.
 
@@ -112,7 +123,7 @@ If the entered keypad number is not assigned to a voice message, the firmware pl
 ## Usage
 
 1. Wire the ESP32, keypad, microSD module, and I2S audio output using the pin tables above.
-2. Place direct-dial MP3 files and matching JSON metadata files under `/long` on the microSD card. Place categorized short MP3 files and matching `.metadata.json` files under `/short`.
+2. Place direct-dial MP3 files and `/long/metadata.json` under `/long` on the microSD card. Place categorized short MP3 files and `/short/metadata.json` under `/short`.
 3. Install PlatformIO.
 4. Build and upload:
 
