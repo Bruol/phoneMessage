@@ -266,13 +266,38 @@ String ESPWebFileManager::sanitizePath(const String & path) {
   return sanitized;
 }
 
+String ESPWebFileManager::existingPathOrAlias(const String & path) {
+  String sanitized = sanitizePath(path);
+  if (sanitized.isEmpty() || current_fs == nullptr || current_fs -> exists(sanitized)) {
+    return sanitized;
+  }
+
+  String alias = sanitized;
+  int firstEnd = alias.indexOf('/', 1);
+  if (firstEnd < 0) {
+    return sanitized;
+  }
+
+  String firstSegment = alias.substring(1, firstEnd);
+  String duplicatePrefix = "/" + firstSegment + "/" + firstSegment;
+  while (alias.startsWith(duplicatePrefix)) {
+    alias = "/" + firstSegment + alias.substring(duplicatePrefix.length());
+    if (current_fs -> exists(alias)) {
+      DEBUG_PRINTX("Resolved repeated path %s to %s\n", sanitized.c_str(), alias.c_str());
+      return alias;
+    }
+  }
+
+  return sanitized;
+}
+
 void ESPWebFileManager::listDir(const char * dirname, uint8_t levels) {
   if (!memory_ready) {
     DEBUG_PRINTLN("File system not initialized.");
     return;
   }
 
-  String directoryPath = sanitizePath(dirname);
+  String directoryPath = existingPathOrAlias(dirname);
   File root = current_fs -> open(directoryPath);
   if (!root || !root.isDirectory()) {
     DEBUG_PRINTLN("Failed to open directory.");
@@ -409,7 +434,7 @@ void ESPWebFileManager::setServer(AsyncWebServer * server) {
   // Route to delete a folder
   server -> on("/delete-folder", HTTP_GET, [ & ](AsyncWebServerRequest * request) {
     String path = request -> hasParam("path") ? request -> getParam("path") -> value() : "";
-    path = sanitizePath(path); // Sanitize the folder path
+    path = existingPathOrAlias(path); // Sanitize and repair stale repeated folder paths
 
     if (path.isEmpty()) {
       request -> send(400, "application/json", "{\"status\":\"error\",\"message\":\"Folder path not provided\"}");
@@ -431,7 +456,7 @@ void ESPWebFileManager::setServer(AsyncWebServer * server) {
 
   server -> on("/delete", HTTP_GET, [ & ](AsyncWebServerRequest * request) {
     String path = request -> hasParam("path") ? request -> getParam("path") -> value() : "";
-    path = sanitizePath(path); // Apply sanitization
+    path = existingPathOrAlias(path); // Sanitize and repair stale repeated file paths
 
     DEBUG_PRINT2("Deleting File: ", path);
     if (current_fs -> exists(path)) {
@@ -450,7 +475,7 @@ void ESPWebFileManager::setServer(AsyncWebServer * server) {
       request -> send(400, "application/json", "{\"status\":\"error\",\"message\":\"Path not provided\"}");
       return;
     }
-    path = sanitizePath(path); // Apply sanitization
+    path = existingPathOrAlias(path); // Sanitize and repair stale repeated file paths
     DEBUG_PRINT2("Downloading File: ", path);
     if (current_fs -> exists(path)) {
       request -> send( * current_fs, path, String(), true);

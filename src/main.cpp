@@ -209,6 +209,7 @@ char keypadBuffer[4] = "";
 byte keypadBufferLength = 0;
 unsigned long lastKeypadDigitMs = 0;
 bool audioActive = false;
+char metadataBuffer[MAX_METADATA_BYTES + 1];
 
 void stopUploadMode()
 {
@@ -457,13 +458,12 @@ void scanLongVoiceNodes(const char *directoryPath)
   char metadataPath[MAX_AUDIO_PATH_LENGTH];
   snprintf(metadataPath, sizeof(metadataPath), "%s/metadata.json", directoryPath);
 
-  char buffer[MAX_METADATA_BYTES + 1];
-  if (!readMetadata(metadataPath, buffer, sizeof(buffer)))
+  if (!readMetadata(metadataPath, metadataBuffer, sizeof(metadataBuffer)))
   {
     return;
   }
 
-  char *cursor = buffer;
+  char *cursor = metadataBuffer;
   while ((cursor = strstr(cursor, "\"number\"")) != nullptr)
   {
     char number[4];
@@ -498,8 +498,7 @@ void scanShortVoiceNotes(const char *directoryPath)
   char metadataPath[MAX_AUDIO_PATH_LENGTH];
   snprintf(metadataPath, sizeof(metadataPath), "%s/metadata.json", directoryPath);
 
-  char buffer[MAX_METADATA_BYTES + 1];
-  if (!readMetadata(metadataPath, buffer, sizeof(buffer)))
+  if (!readMetadata(metadataPath, metadataBuffer, sizeof(metadataBuffer)))
   {
     return;
   }
@@ -509,7 +508,7 @@ void scanShortVoiceNotes(const char *directoryPath)
     char key[4];
     snprintf(key, sizeof(key), "\"%u\"", category);
 
-    char *field = strstr(buffer, key);
+    char *field = strstr(metadataBuffer, key);
     if (!field)
     {
       continue;

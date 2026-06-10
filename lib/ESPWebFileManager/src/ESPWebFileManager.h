@@ -83,6 +83,7 @@ public:
 
     bool begin();
     String sanitizePath(const String &path);
+    String existingPathOrAlias(const String &path);
     void setServer(AsyncWebServer *server);
     void listDir(const char *dirname, uint8_t levels);
     int getFsType();
