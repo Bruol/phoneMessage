@@ -1,98 +1,102 @@
 [
   {
     "number": 10,
-    "path": "/long/Asha_Robins_Schatti.mp3"
+    "path": "/long/Asha_Robins_Schatti.wav"
   },
   {
     "number": 11,
-    "path": "/long/Caroline_Schlendermann.mp3"
+    "path": "/long/Caroline_Schlendermann.wav"
   },
   {
     "number": 12,
-    "path": "/long/Christophe_Schlendermann.mp3"
+    "path": "/long/Christophe_Schlendermann.wav"
   },
   {
     "number": 13,
-    "path": "/long/Drifa Atladottir_long.mp3"
+    "path": "/long/Drífa Atladóttir_long.wav"
   },
   {
     "number": 14,
-    "path": "/long/Eduardo_Aponte.mp3"
+    "path": "/long/Eduardo_Aponte.wav"
   },
   {
     "number": 15,
-    "path": "/long/Eva_Meier.mp3"
+    "path": "/long/Eva_Meier.wav"
   },
   {
     "number": 16,
-    "path": "/long/Kyra_Lina.mp3"
+    "path": "/long/Hannah.wav"
   },
   {
     "number": 17,
-    "path": "/long/Laura_Neufeldt_Schoeller.mp3"
+    "path": "/long/Kyra_Lina.wav"
   },
   {
     "number": 18,
-    "path": "/long/Lorin_Urbantat.mp3"
+    "path": "/long/Laura_Neufeldt_Schoeller.wav"
   },
   {
     "number": 19,
-    "path": "/long/Lux_Gianinazzi.mp3"
+    "path": "/long/Lorin_Urbantat.wav"
   },
   {
     "number": 20,
-    "path": "/long/Lynn_Tschirky.mp3"
+    "path": "/long/Lux_Gianinazzi.wav"
   },
   {
     "number": 21,
-    "path": "/long/Manuela_Pilat.mp3"
+    "path": "/long/Lynn_Tschirky.wav"
   },
   {
     "number": 22,
-    "path": "/long/Mareike_Fell.mp3"
+    "path": "/long/Manuela_Pilat.wav"
   },
   {
     "number": 23,
-    "path": "/long/Maria_Buyse.mp3"
+    "path": "/long/Mareike_Fell.wav"
   },
   {
     "number": 24,
-    "path": "/long/Maria_Vlastaraki.mp3"
+    "path": "/long/Maria_Buyse.wav"
   },
   {
     "number": 25,
-    "path": "/long/Matea_Peshunova.mp3"
+    "path": "/long/Maria_Vlastaraki.wav"
   },
   {
     "number": 26,
-    "path": "/long/Nenna.mp3"
+    "path": "/long/Matea_Peshunova.wav"
   },
   {
     "number": 27,
-    "path": "/long/Nina.mp3"
+    "path": "/long/Nenna.wav"
   },
   {
     "number": 28,
-    "path": "/long/Pablo_Zuluaga.mp3"
+    "path": "/long/Nina.wav"
   },
   {
     "number": 29,
-    "path": "/long/Pleurat_Pllana.mp3"
+    "path": "/long/Pablo_Zuluaga.wav"
   },
   {
     "number": 30,
-    "path": "/long/Sarah_La_Cioppa.mp3"
+    "path": "/long/Pleurat_Pllana.wav"
   },
   {
     "number": 31,
-    "path": "/long/Shweta_Pipaliya_long.mp3"
+    "path": "/long/Sarah_La_Cioppa.wav"
   },
   {
     "number": 32,
-    "path": "/long/Stefanie.mp3"
+    "path": "/long/Shweta_Pipaliya_long.wav"
   },
   {
     "number": 33,
-    "path": "/long/Vanessa_Tschirky.mp3"
+    "path": "/long/Stefanie.wav"
+  },
+  {
+    "number": 34,
+    "path": "/long/Vanessa_Tschirky.wav"
   }
 ]
